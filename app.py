@@ -30,8 +30,8 @@ def webhook():
     if data.get("secret") != SECRET:
         return jsonify({"error": "Unauthorized"}), 403
 
-    # Validate required fields
-    required = ["action", "symbol", "sl", "tp", "price"]
+    # Validate required fields — sl/tp removed, EA calculates them from ATR on MT5 side
+    required = ["action", "symbol", "price"]
     for field in required:
         if field not in data:
             return jsonify({"error": f"Missing field: {field}"}), 400
@@ -40,12 +40,10 @@ def webhook():
     if data["action"] not in ["BUY", "SELL", "CLOSE"]:
         return jsonify({"error": "action must be BUY, SELL or CLOSE"}), 400
 
-    # Build clean signal
+    # Build clean signal — sl/tp calculated by EA on MT5 side using ATR
     latest_signal = {
         "action":    data["action"].upper(),
         "symbol":    data["symbol"].upper(),
-        "sl":        float(data["sl"]),
-        "tp":        float(data["tp"]),
         "price":     float(data["price"]),
         "lot":       0.02,
         "timestamp": datetime.datetime.utcnow().isoformat(),
