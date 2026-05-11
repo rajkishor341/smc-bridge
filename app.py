@@ -4,68 +4,70 @@ Deploy this on Render.com (free tier) — no Python needed on your PC.
 """
 
 from flask import Flask, request, jsonify
-import json
 import os
 import datetime
 
 app = Flask(__name__)
 
-# Simple secret token to block random bots hitting your URL
-# You set this same token in your TradingView alert message
 SECRET = os.environ.get("BRIDGE_SECRET", "smcvantage2024")
-
-# In-memory signal store (Render free tier has ephemeral disk)
 latest_signal = {}
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global latest_signal
 
+    # Log raw body first for debugging
+    raw = request.get_data(as_text=True)
+    print(f"Raw webhook body: {raw}")
+
     try:
         data = request.get_json(force=True)
-    except Exception:
-        return jsonify({"error": "Invalid JSON"}), 400
+    except Exception as e:
+        print(f"JSON parse error: {e} | Body: {raw}")
+        return jsonify({"error": "Invalid JSON", "body": raw}), 400
+
+    if data is None:
+        print(f"Empty or non-JSON body: {raw}")
+        return jsonify({"error": "Empty or invalid JSON", "body": raw}), 400
+
+    print(f"Parsed data: {data}")
 
     # Validate secret
     if data.get("secret") != SECRET:
+        print(f"Auth failed. Got secret: {data.get('secret')}")
         return jsonify({"error": "Unauthorized"}), 403
 
-    # Validate required fields — sl/tp removed, EA calculates them from ATR on MT5 side
-    required = ["action", "symbol", "price"]
-    for field in required:
+    # Validate required fields
+    for field in ["action", "symbol", "price"]:
         if field not in data:
+            print(f"Missing field: {field}")
             return jsonify({"error": f"Missing field: {field}"}), 400
 
-    # Validate action
-    if data["action"] not in ["BUY", "SELL", "CLOSE"]:
-        return jsonify({"error": "action must be BUY, SELL or CLOSE"}), 400
+    # Normalize action — handle buy/sell/BUY/SELL from TradingView
+    action = str(data["action"]).upper().strip()
+    if action not in ["BUY", "SELL", "CLOSE"]:
+        print(f"Invalid action: {data['action']}")
+        return jsonify({"error": f"Invalid action: {data['action']}"}), 400
 
-    # Build clean signal — sl/tp calculated by EA on MT5 side using ATR
+    # Build signal
     latest_signal = {
-        "action":    data["action"].upper(),
-        "symbol":    data["symbol"].upper(),
+        "action":    action,
+        "symbol":    str(data["symbol"]).upper().strip(),
         "price":     float(data["price"]),
         "lot":       0.02,
         "timestamp": datetime.datetime.utcnow().isoformat(),
         "consumed":  False
     }
 
-    print(f"[{latest_signal['timestamp']}] Signal received: {latest_signal}")
+    print(f"Signal accepted: {latest_signal}")
     return jsonify({"status": "ok", "signal": latest_signal}), 200
 
 
 @app.route("/signal", methods=["GET"])
 def get_signal():
-    """MT5 EA polls this endpoint every second to get the latest signal."""
     global latest_signal
-
-    if not latest_signal:
+    if not latest_signal or latest_signal.get("consumed"):
         return jsonify({"action": "NONE"}), 200
-
-    # Mark as consumed after first read so EA doesn't double-trade
-    if latest_signal.get("consumed"):
-        return jsonify({"action": "NONE"}), 200
-
     latest_signal["consumed"] = True
     return jsonify(latest_signal), 200
 
