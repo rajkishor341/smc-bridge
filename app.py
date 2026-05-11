@@ -1,5 +1,5 @@
 """
-SMC Bridge Server v5 — accepts SL from TradingView, EA calculates TP
+SMC Bridge Server v6 — robust SL handling
 """
 
 from flask import Flask, request, jsonify
@@ -23,6 +23,14 @@ ACTION_MAP = {
     "close":      "CLOSE",
 }
 
+def parse_float(val):
+    """Safely parse float — returns 0.0 if invalid or placeholder"""
+    try:
+        f = float(val)
+        return f if f > 0 else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global latest_signal
@@ -37,7 +45,7 @@ def webhook():
         return jsonify({"error": "Invalid JSON", "raw": raw}), 400
 
     if data is None:
-        return jsonify({"error": "Empty JSON", "raw": raw}), 400
+        return jsonify({"error": "Empty JSON"}), 400
 
     print(f"PARSED: {data}")
 
@@ -63,13 +71,14 @@ def webhook():
         else:
             return jsonify({"error": f"Unknown action: {data['action']}"}), 400
 
-    # SL from TradingView (optional — EA uses it if provided)
-    sl = float(data["sl"]) if "sl" in data and data["sl"] else 0.0
+    # Safe parse price and SL — never crash on invalid values
+    price = parse_float(data.get("price", 0))
+    sl    = parse_float(data.get("sl", 0))
 
     latest_signal = {
         "action":    action,
         "symbol":    str(data["symbol"]).upper().strip(),
-        "price":     float(data["price"]),
+        "price":     price,
         "sl":        sl,
         "lot":       0.02,
         "timestamp": datetime.datetime.utcnow().isoformat(),
